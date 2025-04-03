@@ -18,12 +18,12 @@ import pandas as pd
 class Config:
     DATA_PATH = 'wheat_diseases/train'
     CLASSES = sorted(os.listdir(DATA_PATH))
-    GLCM_PROPERTIES = ['contrast', 'dissimilarity', 'homogeneity', 'energy', 'correlation']
+    GLCM_PROPERTIES = ['contrast', 'dissimilarity', 'homogeneity', 'energy', 'correlation', 'ASM', 'mean', 'entropy']
     COLOR_COMBINATIONS = ['R', 'G', 'B', 'RG', 'GB', 'RB']  # 6 цветовых компонент
     GLCM_DISTANCES = [1]
     GLCM_ANGLES = [0, np.pi / 4, np.pi / 2, 3 * np.pi / 4]
     TEST_SIZE = 0.2
-    TRAIN_SIZE = 100
+    TRAIN_SIZE = 20
     RANDOM_STATE = 42
     EPOCHS = 100
     BATCH_SIZE = 8
@@ -310,18 +310,18 @@ def visualize_glcm(image_path):
 
 
 if __name__ == '__main__':
-    # print("Training new model...")
-    # model, X_mean, X_std, lb = train_model()
-    try:
-        model = load_model('tf_model_6ch.h5')
-        params = np.load('normalization_params_6ch.npz')
-        X_mean, X_std = params['mean'], params['std']
-        with open('label_binarizer_6ch.pkl', 'rb') as f:
-            lb = pickle.load(f)
-        print("Model loaded from file")
-    except:
-        print("Training new model...")
-        model, X_mean, X_std, lb = train_model()
+    print("Training new model...")
+    model, X_mean, X_std, lb = train_model()
+    # try:
+    #     model = load_model('tf_model_6ch.h5')
+    #     params = np.load('normalization_params_6ch.npz')
+    #     X_mean, X_std = params['mean'], params['std']
+    #     with open('label_binarizer_6ch.pkl', 'rb') as f:
+    #         lb = pickle.load(f)
+    #     print("Model loaded from file")
+    # except:
+    #     print("Training new model...")
+    #     model, X_mean, X_std, lb = train_model()
 
     test_image = 'Dark_brown.png'  # Укажите путь к тестовому изображению
     if os.path.exists(test_image):
