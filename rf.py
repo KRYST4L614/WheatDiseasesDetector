@@ -1,6 +1,6 @@
 import os
-import cv2
 import numpy as np
+import torch
 from skimage.feature import graycomatrix, graycoprops
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
@@ -172,6 +172,7 @@ def visualize_prediction(image_path, prediction):
 if __name__ == '__main__':
     # Обучение модели
     model = train_model()
+    torch.save(model.state_dict(), "model.h5")
 
     # Пример предсказания
     image_path = 'Dark_brown.png'  # Укажите путь к тестовому изображению

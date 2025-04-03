@@ -1,6 +1,7 @@
 import os
 import pickle
 import numpy as np
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 from skimage.feature import graycomatrix, graycoprops
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelBinarizer
@@ -11,6 +12,7 @@ from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Dropout, Dense
 from tensorflow.keras.callbacks import EarlyStopping
 from tensorflow.keras.models import load_model
+import pandas as pd
 
 
 class Config:
@@ -227,19 +229,99 @@ def visualize_prediction(image_path, prediction, lb):
     plt.show()
 
 
+def visualize_glcm_matrix(image_path, distance=1, angle=0):
+    # Загрузка и подготовка изображения
+    img = np.array(Image.open(image_path).convert('L'))
+    img = (img * 255).astype(np.uint8)
+
+    # Вычисление GLCM
+    glcm = graycomatrix(img,
+                        distances=[distance],
+                        angles=[angle],
+                        levels=256,
+                        symmetric=True,
+                        normed=True)
+
+    # Преобразование в 2D матрицу
+    glcm_matrix = np.squeeze(glcm).astype(float)
+
+    # Создаем фигуру
+    fig, ax = plt.subplots(figsize=(12, 10))
+
+    # Отображаем матрицу как таблицу
+    df = pd.DataFrame(glcm_matrix[:20, :20])  # Показываем только 20x20 для наглядности
+
+    # Создаем табличное представление
+    table = plt.table(cellText=np.round(df.values, 4),
+                      rowLabels=df.index,
+                      colLabels=df.columns,
+                      loc='center',
+                      cellLoc='center')
+
+    # Настройки внешнего вида
+    table.scale(1, 1.5)
+    ax.axis('off')
+    ax.set_title(f'GLCM Matrix (Distance={distance}, Angle={np.degrees(angle):.0f}°)',
+                 fontsize=14, pad=20)
+
+    # Добавляем пояснения
+    plt.figtext(0.5, 0.05,
+                "Каждая ячейка показывает вероятность перехода от интенсивности i (строка) к j (столбец)",
+                ha="center", fontsize=12)
+
+    plt.tight_layout()
+    plt.show()
+
+def visualize_glcm(image_path):
+    # Загрузка и преобразование изображения
+    img = np.array(Image.open(image_path).convert('L'))
+    img = (img * 255).astype(np.uint8)
+
+    # Вычисление GLCM для разных углов
+    angles = [0, np.pi / 4, np.pi / 2, 3 * np.pi / 4]
+    titles = ['0°', '45°', '90°', '135°']
+
+    # Создаем фигуру с 5 subplots (оригинал + 4 угла)
+    fig, axes = plt.subplots(1, 5, figsize=(20, 4))
+    fig.suptitle('GLCM Matrix Visualization', fontsize=16)
+
+    # Отображаем оригинальное изображение
+    axes[0].imshow(img, cmap='gray')
+    axes[0].set_title('Original Image')
+    axes[0].axis('off')
+
+    # Вычисляем и отображаем GLCM для каждого угла
+    for i, angle in enumerate(angles, 1):
+        glcm = graycomatrix(img, distances=[1], angles=[angle],
+                            levels=256, symmetric=True, normed=True)
+        glcm_matrix = np.squeeze(glcm)
+
+        im = axes[i].imshow(glcm_matrix, cmap='hot')
+        axes[i].set_title(f'Angle: {titles[i - 1]}')
+        axes[i].axis('off')
+
+        # Добавляем colorbar для каждого subplot
+        divider = make_axes_locatable(axes[i])
+        cax = divider.append_axes("right", size="5%", pad=0.05)
+        plt.colorbar(im, cax=cax)
+
+    plt.tight_layout()
+    plt.show()
+
+
 if __name__ == '__main__':
-    print("Training new model...")
-    model, X_mean, X_std, lb = train_model()
-    # try:
-    #     model = load_model('tf_model_6ch.h5')
-    #     params = np.load('normalization_params_6ch.npz')
-    #     X_mean, X_std = params['mean'], params['std']
-    #     with open('label_binarizer_6ch.pkl', 'rb') as f:
-    #         lb = pickle.load(f)
-    #     print("Model loaded from file")
-    # except:
-    #     print("Training new model...")
-    #     model, X_mean, X_std, lb = train_model()
+    # print("Training new model...")
+    # model, X_mean, X_std, lb = train_model()
+    try:
+        model = load_model('tf_model_6ch.h5')
+        params = np.load('normalization_params_6ch.npz')
+        X_mean, X_std = params['mean'], params['std']
+        with open('label_binarizer_6ch.pkl', 'rb') as f:
+            lb = pickle.load(f)
+        print("Model loaded from file")
+    except:
+        print("Training new model...")
+        model, X_mean, X_std, lb = train_model()
 
     test_image = 'Dark_brown.png'  # Укажите путь к тестовому изображению
     if os.path.exists(test_image):
@@ -251,5 +333,11 @@ if __name__ == '__main__':
             print(f"  {cls}: {prob:.4f}")
 
         visualize_prediction(test_image, result, lb)
+    else:
+        print(f"Файл {test_image} не найден!")
+
+    if os.path.exists(test_image):
+        # Визуализация для разных углов
+        visualize_glcm(test_image)
     else:
         print(f"Файл {test_image} не найден!")
