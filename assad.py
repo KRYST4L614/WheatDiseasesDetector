@@ -1,6 +1,7 @@
 import os
 import pickle
 import numpy as np
+import cv2
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from skimage.feature import graycomatrix, graycoprops
 from sklearn.model_selection import train_test_split
@@ -12,13 +13,14 @@ from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Dropout, Dense
 from tensorflow.keras.callbacks import EarlyStopping
 from tensorflow.keras.models import load_model
+from skimage import img_as_ubyte, transform
 import pandas as pd
 
 
 class Config:
     DATA_PATH = 'wheat_diseases/train'
     CLASSES = sorted(os.listdir(DATA_PATH))
-    GLCM_PROPERTIES = ['contrast', 'dissimilarity', 'homogeneity', 'energy', 'correlation', 'ASM', 'mean', 'entropy']
+    GLCM_PROPERTIES = ['energy', 'contrast', 'homogeneity', 'entropy', 'dissimilarity', 'correlation', 'ASM', 'mean']
     COLOR_COMBINATIONS = ['R', 'G', 'B', 'RG', 'GB', 'RB']  # 6 цветовых компонент
     GLCM_DISTANCES = [1]
     GLCM_ANGLES = [0, np.pi / 4, np.pi / 2, 3 * np.pi / 4]
@@ -28,24 +30,29 @@ class Config:
     EPOCHS = 100
     BATCH_SIZE = 8
     PATIENCE = 10
+    IMG_SIZE = (255, 255)
 
 
 def extract_color_combinations(img):
     """Извлекает 6 цветовых комбинаций: R, G, B, RG, GB, RB"""
     # Разделяем на RGB каналы
+    size = Config.IMG_SIZE
     r, g, b = img.split()
-    r = np.array(r)
-    g = np.array(g)
-    b = np.array(b)
+    r = transform.resize(np.array(r), size, anti_aliasing=True)
+    g = transform.resize(np.array(b), size, anti_aliasing=True)
+    b = transform.resize(np.array(b), size, anti_aliasing=True)
+    rg = transform.resize(np.array((r.astype(np.float32) + g.astype(np.float32)) / 2), size, anti_aliasing=True)
+    gb = transform.resize(np.array((g.astype(np.float32) + b.astype(np.float32)) / 2), size, anti_aliasing=True)
+    rb = transform.resize(np.array((r.astype(np.float32) + b.astype(np.float32)) / 2), size, anti_aliasing=True)
 
     # Создаем комбинации каналов
     combinations = {
-        'R': r,
-        'G': g,
-        'B': b,
-        'RG': (r.astype(np.float32) + g.astype(np.float32)) / 2,
-        'GB': (g.astype(np.float32) + b.astype(np.float32)) / 2,
-        'RB': (r.astype(np.float32) + b.astype(np.float32)) / 2
+        'R': img_as_ubyte(r),
+        'G': img_as_ubyte(g),
+        'B': img_as_ubyte(b),
+        'RG': img_as_ubyte((rg - np.min(rg)) / (np.max(rg) - np.min(rg))),
+        'GB': img_as_ubyte((gb - np.min(gb)) / (np.max(gb) - np.min(gb))),
+        'RB': img_as_ubyte((rb - np.min(rb)) / (np.max(rb) - np.min(rb)))
     }
 
     return combinations
@@ -55,22 +62,24 @@ def extract_glcm_features(image_path):
     """Извлекает признаки Харалика для всех 6 цветовых комбинаций"""
     img = Image.open(image_path)
     color_combinations = extract_color_combinations(img)
+    # Конвертируем в 8-битное изображение (0-255)
+    # image = img_as_ubyte(color_combinations)
 
     all_features = []
 
     for combo_name in Config.COLOR_COMBINATIONS:
         channel_data = color_combinations[combo_name]
 
-        # Нормализация и преобразование в uint8
-        channel_data = (channel_data * 255).astype(np.uint8)
+        max_val = channel_data.max()
+        quantized = np.digitize(channel_data, bins=np.linspace(0, max_val, 8)) - 1
 
         # Вычисление GLCM матрицы
-        glcm = graycomatrix(channel_data,
+        glcm = graycomatrix(quantized,
                             distances=Config.GLCM_DISTANCES,
                             angles=Config.GLCM_ANGLES,
-                            levels=256,
+                            levels=8,
                             symmetric=True,
-                            normed=True)
+                            normed=False)
 
         # Извлечение признаков для каждого свойства
         for prop in Config.GLCM_PROPERTIES:
@@ -78,33 +87,6 @@ def extract_glcm_features(image_path):
             all_features.extend(feature)
 
     return np.array(all_features)
-
-
-# Функция для извлечения GLCM признаков
-# def extract_glcm_features(image_path):
-#     # Загрузка и преобразование в grayscale
-#     img = np.array(Image.open(image_path).convert('L'))
-#
-#     # Нормализация изображения
-#     img = (img * 255).astype(np.uint8)
-#
-#     # Вычисление GLCM матрицы
-#     glcm = graycomatrix(img,
-#                         distances=Config.GLCM_DISTANCES,
-#                         angles=Config.GLCM_ANGLES,
-#                         levels=256,
-#                         symmetric=True,
-#                         normed=True)
-#
-#     # Извлечение признаков
-#     features = []
-#     for prop in Config.GLCM_PROPERTIES:
-#         features.extend(graycoprops(glcm, prop).ravel())
-#     # features.extend(calculate_difference_entropy(glcm).ravel())
-#
-#     return np.array(features)
-
-
 
 def load_data():
     features = []
@@ -133,9 +115,9 @@ def load_data():
 
 def create_model(input_shape, num_classes):
     model = Sequential([
-        Dense(512, activation='relu', input_shape=(input_shape,)),
+        Dense(256, activation='relu', input_shape=(input_shape,)),
         Dropout(0.25),
-        Dense(512, activation='relu'),
+        Dense(256, activation='relu'),
         Dropout(0.25),
         Dense(num_classes, activation='softmax')
     ])
@@ -167,7 +149,7 @@ def train_model():
         X_train, y_train,
         epochs=Config.EPOCHS,
         batch_size=Config.BATCH_SIZE,
-        validation_split=0.1,
+        validation_split=0.2,
         callbacks=[early_stopping],
         verbose=1)
 
@@ -274,56 +256,75 @@ def visualize_glcm_matrix(image_path, distance=1, angle=0):
 
 def visualize_glcm(image_path):
     # Загрузка и преобразование изображения
-    img = np.array(Image.open(image_path).convert('L'))
-    img = (img * 255).astype(np.uint8)
+    img = Image.open(image_path)
+    r, g, b = img.split()
+    r = np.array(r)
+    r = transform.resize(r, Config.IMG_SIZE, anti_aliasing=True)
+    # Конвертируем в 8-битное изображение (0-255)
+    image = img_as_ubyte(r)
 
-    # Вычисление GLCM для разных углов
-    angles = [0, np.pi / 4, np.pi / 2, 3 * np.pi / 4]
-    titles = ['0°', '45°', '90°', '135°']
+    # Квантуем до заданного количества уровней
+    max_val = image.max()
+    quantized = np.digitize(image, bins=np.linspace(0, max_val, 8)) - 1
 
-    # Создаем фигуру с 5 subplots (оригинал + 4 угла)
-    fig, axes = plt.subplots(1, 5, figsize=(20, 4))
-    fig.suptitle('GLCM Matrix Visualization', fontsize=16)
+    # Вычисление GLCM
+    glcm = graycomatrix(quantized,
+                        distances=[1],
+                        angles=[0],
+                        levels=8,
+                        symmetric=True,
+                        normed=False)
 
-    # Отображаем оригинальное изображение
-    axes[0].imshow(img, cmap='gray')
-    axes[0].set_title('Original Image')
-    axes[0].axis('off')
+    # Преобразование в 2D матрицу
+    glcm_matrix = np.squeeze(glcm).astype(float)
 
-    # Вычисляем и отображаем GLCM для каждого угла
-    for i, angle in enumerate(angles, 1):
-        glcm = graycomatrix(img, distances=[1], angles=[angle],
-                            levels=256, symmetric=True, normed=True)
-        glcm_matrix = np.squeeze(glcm)
+    # Создаем фигуру
+    fig, ax = plt.subplots(figsize=(12, 10))
 
-        im = axes[i].imshow(glcm_matrix, cmap='hot')
-        axes[i].set_title(f'Angle: {titles[i - 1]}')
-        axes[i].axis('off')
+    # Отображаем матрицу как таблицу
+    df = pd.DataFrame(glcm_matrix[:8, :8])  # Показываем только 20x20 для наглядности
 
-        # Добавляем colorbar для каждого subplot
-        divider = make_axes_locatable(axes[i])
-        cax = divider.append_axes("right", size="5%", pad=0.05)
-        plt.colorbar(im, cax=cax)
+    # Создаем табличное представление
+    table = plt.table(cellText=np.round(df.values, 4),
+                      rowLabels=df.index,
+                      colLabels=df.columns,
+                      loc='center',
+                      cellLoc='center')
+
+    # Настройки внешнего вида
+    table.scale(1, 1.5)
+    ax.axis('off')
+    ax.set_title(f'GLCM Matrix (Distance={1}, Angle={np.degrees(0):.0f}°)',
+                 fontsize=14, pad=20)
+
+    # Добавляем пояснения
+    plt.figtext(0.5, 0.05,
+                "Каждая ячейка показывает вероятность перехода от интенсивности i (строка) к j (столбец)",
+                ha="center", fontsize=12)
 
     plt.tight_layout()
     plt.show()
 
+    plt.imshow(quantized)
+    plt.show()
+
+
 
 if __name__ == '__main__':
-    print("Training new model...")
-    model, X_mean, X_std, lb = train_model()
-    # try:
-    #     model = load_model('tf_model_6ch.h5')
-    #     params = np.load('normalization_params_6ch.npz')
-    #     X_mean, X_std = params['mean'], params['std']
-    #     with open('label_binarizer_6ch.pkl', 'rb') as f:
-    #         lb = pickle.load(f)
-    #     print("Model loaded from file")
-    # except:
-    #     print("Training new model...")
-    #     model, X_mean, X_std, lb = train_model()
+    # print("Training new model...")
+    # model, X_mean, X_std, lb = train_model()
+    try:
+        model = load_model('tf_model_6ch.h5')
+        params = np.load('normalization_params_6ch.npz')
+        X_mean, X_std = params['mean'], params['std']
+        with open('label_binarizer_6ch.pkl', 'rb') as f:
+            lb = pickle.load(f)
+        print("Model loaded from file")
+    except:
+        print("Training new model...")
+        model, X_mean, X_std, lb = train_model()
 
-    test_image = 'Dark_brown.png'  # Укажите путь к тестовому изображению
+    test_image = 'Brown_rust.jpg'  # Укажите путь к тестовому изображению
     if os.path.exists(test_image):
         result = predict_image(model, X_mean, X_std, lb, test_image)
         print(f"Результат анализа: {result['class']}")
